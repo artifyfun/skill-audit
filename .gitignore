@@ -3,3 +3,4 @@ __pycache__/
 *.json
 *.jsonl
 !.vscode/settings.json
+!examples/hooks-settings.json
