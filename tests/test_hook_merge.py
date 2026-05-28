@@ -1,4 +1,5 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
 import sys
 from pathlib import Path
@@ -11,7 +12,17 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from lib.install_manifest import REQUIRED_HOOKS
-from lib.settings_merge import ConflictError, SettingsParseError, _ensure_safe_path, detect_conflicts, load_settings, merge_hooks
+from lib.settings_merge import (
+    ConflictError,
+    SettingsParseError,
+    _ensure_safe_path,
+    detect_conflicts,
+    load_settings,
+    merge_hooks,
+)
+
+
+PRETOOLUSE_TELEMETRY_COMMAND = REQUIRED_HOOKS["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
 
 
 def test_merge_hooks_adds_required_entries() -> None:
@@ -164,6 +175,85 @@ def test_merge_hooks_replaces_managed_same_matcher_hook_with_force() -> None:
 
     assert changed is True
     assert merged["hooks"]["PreToolUse"] == REQUIRED_HOOKS["hooks"]["PreToolUse"]
+
+
+def test_merge_hooks_appends_required_command_in_append_mode() -> None:
+    existing = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {"type": "command", "command": "printf 'existing-1' >> /tmp/a.log"},
+                        {"type": "command", "command": "printf 'existing-2' >> /tmp/b.log"},
+                    ],
+                },
+                {
+                    "matcher": "Read",
+                    "hooks": [{"type": "command", "command": "printf 'read' >> /tmp/read.log"}],
+                },
+            ]
+        },
+        "metadata": {"owner": "user"},
+    }
+
+    merged, changed = merge_hooks(existing, REQUIRED_HOOKS, force=False, append_pretooluse_bash=True)
+
+    bash_hooks = merged["hooks"]["PreToolUse"][0]["hooks"]
+    assert changed is True
+    assert bash_hooks == [
+        {"type": "command", "command": "printf 'existing-1' >> /tmp/a.log"},
+        {"type": "command", "command": "printf 'existing-2' >> /tmp/b.log"},
+        {"type": "command", "command": PRETOOLUSE_TELEMETRY_COMMAND},
+    ]
+    assert merged["hooks"]["PreToolUse"][1] == {
+        "matcher": "Read",
+        "hooks": [{"type": "command", "command": "printf 'read' >> /tmp/read.log"}],
+    }
+    assert merged["metadata"]["owner"] == "user"
+    assert merged["metadata"]["skill-audit-managed"] == ["UserPromptSubmit:*"]
+
+    second, second_changed = merge_hooks(merged, REQUIRED_HOOKS, force=False, append_pretooluse_bash=True)
+
+    assert second_changed is False
+    assert second == merged
+
+
+def test_detect_conflicts_allows_append_mode_for_existing_pretooluse_bash() -> None:
+    existing = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": "printf 'existing' >> /tmp/a.log"}],
+                }
+            ]
+        }
+    }
+
+    conflicts = detect_conflicts(existing, REQUIRED_HOOKS, append_pretooluse_bash=True)
+
+    assert conflicts == []
+
+
+def test_merge_hooks_force_does_not_replace_user_entry_after_append_mode() -> None:
+    existing = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": "printf 'existing' >> /tmp/a.log"}],
+                }
+            ]
+        }
+    }
+
+    appended, appended_changed = merge_hooks(existing, REQUIRED_HOOKS, force=False, append_pretooluse_bash=True)
+
+    assert appended_changed is True
+
+    with pytest.raises(ConflictError):
+        merge_hooks(appended, REQUIRED_HOOKS, force=True)
 
 
 def test_load_settings_raises_for_invalid_json(tmp_path: Path) -> None:

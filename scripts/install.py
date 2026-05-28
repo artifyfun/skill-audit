@@ -31,6 +31,7 @@ def run_install(
     dry_run: bool = False,
     force: bool = False,
     backup: bool = False,
+    append_pretooluse_bash: bool = False,
 ) -> InstallResult:
     validate_install_dir(install_dir, force=force)
 
@@ -42,7 +43,12 @@ def run_install(
     if with_hooks:
         settings = load_settings(settings_path)
         try:
-            merged_settings, hooks_changed = merge_hooks(settings, REQUIRED_HOOKS, force=force)
+            merged_settings, hooks_changed = merge_hooks(
+                settings,
+                REQUIRED_HOOKS,
+                force=force,
+                append_pretooluse_bash=append_pretooluse_bash,
+            )
         except ConflictError as exc:
             conflicts = exc.conflicts
             return InstallResult(
@@ -94,6 +100,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--without-hooks", dest="with_hooks", action="store_false")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--append-pretooluse-bash",
+        action="store_true",
+        help="append the telemetry command into an existing PreToolUse:Bash hook instead of reporting a conflict",
+    )
     parser.add_argument("--settings", type=Path, default=Path.home() / ".claude/settings.json")
     parser.add_argument("--backup", action="store_true")
     return parser.parse_args()
@@ -112,6 +123,7 @@ def main() -> int:
             dry_run=args.dry_run,
             force=args.force,
             backup=args.backup,
+            append_pretooluse_bash=args.append_pretooluse_bash,
         )
     except (InstallTargetError, ValueError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False, indent=2))

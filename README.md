@@ -173,6 +173,7 @@ Useful flags:
 | `--settings <path>` | use a different settings file, useful for testing |
 | `--backup` | accepted for compatibility; settings are backed up automatically only when a hook change is written |
 | `--force` | allow install into a non-clean target and replace conflicting managed hook entries |
+| `--append-pretooluse-bash` | append the telemetry command into an existing `PreToolUse:Bash` hook entry instead of reporting a conflict |
 
 Hook merge rules:
 
@@ -180,7 +181,7 @@ Hook merge rules:
 |---|---|
 | missing settings file | a new minimal settings object is planned or written only when `--with-hooks` is used |
 | identical managed hooks already present | no duplicate hook entries are added |
-| conflicting hook entry with same matcher but different commands | installer reports a conflict unless `--force` is passed |
+| conflicting hook entry with same matcher but different commands | installer reports a conflict unless `--force` is passed, except `PreToolUse:Bash` when `--append-pretooluse-bash` is used |
 | settings change is written | existing settings file is backed up first |
 
 The installer writes JSON to stdout describing what it planned or changed.

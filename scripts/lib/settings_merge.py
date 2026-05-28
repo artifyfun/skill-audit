@@ -149,7 +149,12 @@ def _has_matcher_conflict(entries: list[Any], event_name: str, matcher: str, man
 
 
 
-def detect_conflicts(existing: JsonDict, required: JsonDict, force: bool = False) -> list[str]:
+def detect_conflicts(
+    existing: JsonDict,
+    required: JsonDict,
+    force: bool = False,
+    append_pretooluse_bash: bool = False,
+) -> list[str]:
     conflicts: list[str] = []
     existing_hooks = existing.get("hooks")
     required_hooks = required.get("hooks")
@@ -174,6 +179,8 @@ def detect_conflicts(existing: JsonDict, required: JsonDict, force: bool = False
             if _find_matching_entry_index(current_entries, matcher, commands) is not None:
                 continue
             if force and _find_managed_entry_index(current_entries, event_name, matcher, managed_hooks) is not None:
+                continue
+            if append_pretooluse_bash and event_name == "PreToolUse" and matcher == "Bash":
                 continue
             if _has_matcher_conflict(current_entries, event_name, matcher, managed_hooks):
                 conflicts.append(_event_conflict_path(event_name, matcher))
@@ -221,25 +228,68 @@ def _replace_managed_entry(
 
 
 
+def _append_pretooluse_bash_command(
+    entries: list[Any],
+    required_entry: JsonDict,
+    event_name: str,
+    matcher: str,
+    commands: CommandFingerprint,
+) -> bool:
+    matches = _matching_entries(entries, matcher)
+    if len(matches) != 1:
+        raise ConflictError([_event_conflict_path(event_name, matcher)])
+
+    index, entry = matches[0]
+    hooks = entry.get("hooks")
+    if not isinstance(hooks, list):
+        raise ConflictError([_event_conflict_path(event_name, matcher)])
+
+    existing_commands = {tuple(command) for command in _command_fingerprint(entry)[1]}
+    changed = False
+    for hook_type, command in commands:
+        if (hook_type, command) in existing_commands:
+            continue
+        hooks.append({"type": hook_type, "command": command})
+        existing_commands.add((hook_type, command))
+        changed = True
+
+    entries[index] = entry
+    return changed
+
+
+
 def _merge_required_entry(
     entries: list[Any],
     required_entry: JsonDict,
     event_name: str,
     managed_hooks: set[str],
     force: bool,
+    append_pretooluse_bash: bool,
 ) -> bool:
     matcher, commands = _command_fingerprint(required_entry)
     if _find_matching_entry_index(entries, matcher, commands) is not None:
         return _ensure_managed_marker(event_name, matcher, managed_hooks)
+    if append_pretooluse_bash and event_name == "PreToolUse" and matcher == "Bash":
+        return _append_pretooluse_bash_command(entries, required_entry, event_name, matcher, commands)
     if force and _find_managed_entry_index(entries, event_name, matcher, managed_hooks) is not None:
         return _replace_managed_entry(entries, required_entry, event_name, matcher, managed_hooks)
     return _append_required_entry(entries, required_entry, event_name, matcher, managed_hooks)
 
 
 
-def merge_hooks(existing: JsonDict, required: JsonDict, force: bool) -> tuple[JsonDict, bool]:
+def merge_hooks(
+    existing: JsonDict,
+    required: JsonDict,
+    force: bool,
+    append_pretooluse_bash: bool = False,
+) -> tuple[JsonDict, bool]:
     if not force:
-        conflicts = detect_conflicts(existing, required, force=False)
+        conflicts = detect_conflicts(
+            existing,
+            required,
+            force=False,
+            append_pretooluse_bash=append_pretooluse_bash,
+        )
         if conflicts:
             raise ConflictError(conflicts)
 
@@ -274,6 +324,7 @@ def merge_hooks(existing: JsonDict, required: JsonDict, force: bool) -> tuple[Js
                 event_name,
                 managed_hooks,
                 force=force,
+                append_pretooluse_bash=append_pretooluse_bash,
             ) or changed
 
     _set_managed_hooks(merged, managed_hooks)

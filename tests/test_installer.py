@@ -1,4 +1,5 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
 import json
 import subprocess
@@ -299,6 +300,139 @@ def test_run_install_reports_conflicts_without_writing_settings(tmp_path: Path) 
     assert sorted(settings_path.parent.glob("settings.json.bak.*")) == []
 
 
+def test_run_install_reports_pretooluse_conflict_by_default(tmp_path: Path) -> None:
+    source_dir = make_source_tree(tmp_path)
+    install_dir = tmp_path / "installed" / "skill-audit"
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {"type": "command", "command": "printf 'existing' >> /tmp/bash.log"}
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    before = settings_path.read_text(encoding="utf-8")
+    result = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+    )
+
+    assert result.conflicts == ["hooks.PreToolUse[matcher=Bash]"]
+    assert result.hooks_merged is False
+    assert result.planned_settings_change is False
+    assert settings_path.read_text(encoding="utf-8") == before
+
+
+def test_run_install_appends_pretooluse_hook_in_append_mode(tmp_path: Path) -> None:
+    source_dir = make_source_tree(tmp_path)
+    install_dir = tmp_path / "installed" / "skill-audit"
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {"type": "command", "command": "printf 'existing' >> /tmp/bash.log"}
+                            ],
+                        }
+                    ]
+                },
+                "metadata": {"owner": "user"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        append_pretooluse_bash=True,
+    )
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    bash_hooks = settings["hooks"]["PreToolUse"][0]["hooks"]
+    telemetry_command = json.loads(FILES_TO_COPY["examples/hooks-settings.json"])["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+
+    assert result.conflicts == []
+    assert result.hooks_merged is True
+    assert result.planned_settings_change is True
+    assert bash_hooks == [
+        {"type": "command", "command": "printf 'existing' >> /tmp/bash.log"},
+        {"type": "command", "command": telemetry_command},
+    ]
+    assert settings["metadata"]["owner"] == "user"
+    assert settings["metadata"]["skill-audit-managed"] == ["UserPromptSubmit:*"]
+
+
+
+def test_run_install_force_still_reports_pretooluse_conflict_after_append_mode(tmp_path: Path) -> None:
+    source_dir = make_source_tree(tmp_path)
+    install_dir = tmp_path / "installed" / "skill-audit"
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {"type": "command", "command": "printf 'existing' >> /tmp/bash.log"}
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    appended = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        append_pretooluse_bash=True,
+    )
+    forced = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        force=True,
+    )
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    bash_hooks = settings["hooks"]["PreToolUse"][0]["hooks"]
+    telemetry_command = json.loads(FILES_TO_COPY["examples/hooks-settings.json"])["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+
+    assert appended.conflicts == []
+    assert forced.conflicts == ["hooks.PreToolUse[matcher=Bash]"]
+    assert forced.hooks_merged is False
+    assert bash_hooks == [
+        {"type": "command", "command": "printf 'existing' >> /tmp/bash.log"},
+        {"type": "command", "command": telemetry_command},
+    ]
+
+
 def test_cli_returns_non_zero_on_conflict(tmp_path: Path) -> None:
     source_dir = make_source_tree(tmp_path)
     repo_root = tmp_path / "repo"
@@ -554,63 +688,6 @@ def test_cli_without_hooks_skips_settings_changes(tmp_path: Path) -> None:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-n
 
 
 
