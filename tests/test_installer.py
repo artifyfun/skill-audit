@@ -441,6 +441,177 @@ def test_cli_with_backup_flag_creates_backup_when_settings_change(tmp_path: Path
     assert json.loads(settings_path.read_text(encoding="utf-8"))["hooks"]["OtherEvent"] == []
 
 
+def test_parse_args_defaults_to_global_target_and_hooks_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["install.py"])
+
+    args = __import__("install").parse_args()
+
+    assert args.target == "global"
+    assert args.with_hooks is True
+
+
+def test_cli_defaults_install_to_global_and_merges_hooks(tmp_path: Path) -> None:
+    source_dir = make_source_tree(tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    for source_path in source_dir.rglob("*"):
+        if source_path.is_dir():
+            continue
+        file_path = repo_root / source_path.relative_to(source_dir)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    fake_home = tmp_path / "home"
+    settings_path = fake_home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps({"hooks": {"OtherEvent": []}}), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(repo_root / "scripts/install.py")],
+        cwd=repo_root,
+        env={"HOME": str(fake_home)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(result.stdout)
+    install_dir = fake_home / ".claude" / "skills" / "skill-audit"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    assert result.returncode == 0
+    assert payload["status"] == "ok"
+    assert payload["hooks_merged"] is True
+    assert payload["planned_settings_change"] is True
+    assert (install_dir / "SKILL.md").exists()
+    assert settings["hooks"]["OtherEvent"] == []
+    assert "UserPromptSubmit" in settings["hooks"]
+    assert "PreToolUse" in settings["hooks"]
+
+
+def test_cli_without_hooks_skips_settings_changes(tmp_path: Path) -> None:
+    source_dir = make_source_tree(tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    for source_path in source_dir.rglob("*"):
+        if source_path.is_dir():
+            continue
+        file_path = repo_root / source_path.relative_to(source_dir)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    fake_home = tmp_path / "home"
+    settings_path = fake_home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    original_settings = {"hooks": {"OtherEvent": []}}
+    settings_path.write_text(json.dumps(original_settings), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(repo_root / "scripts/install.py"), "--without-hooks"],
+        cwd=repo_root,
+        env={"HOME": str(fake_home)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(result.stdout)
+    install_dir = fake_home / ".claude" / "skills" / "skill-audit"
+
+    assert result.returncode == 0
+    assert payload["status"] == "ok"
+    assert payload["hooks_merged"] is False
+    assert payload["planned_settings_change"] is False
+    assert payload["settings_backup"] is None
+    assert (install_dir / "SKILL.md").exists()
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == original_settings
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+n
+
 
 
 

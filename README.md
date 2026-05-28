@@ -111,16 +111,22 @@ Install the whole directory, not just `SKILL.md`.
 
 ### Install as a global skill
 
-Use the installer to copy the full skill payload into your global Claude skills directory:
+Global install is now the default. Running the installer with no target copies the full skill payload into your global Claude skills directory and merges the sample hooks into Claude settings:
 
 ```bash
-python3 scripts/install.py --target global
+python3 scripts/install.py
 ```
 
 Preview the copy plan first if you want to confirm the destination:
 
 ```bash
-python3 scripts/install.py --target global --dry-run
+python3 scripts/install.py --dry-run
+```
+
+If you want a global install without merging hooks:
+
+```bash
+python3 scripts/install.py --without-hooks
 ```
 
 ### Install as a project-local skill
@@ -137,6 +143,16 @@ Preview the local install first:
 python3 scripts/install.py --target project --dry-run
 ```
 
+If you want a project-local install without merging hooks:
+
+```bash
+python3 scripts/install.py --target project --without-hooks
+```
+
+### Optional hook control
+
+Hook merge is now enabled by default. Use `--without-hooks` to skip merging the sample telemetry hooks.
+
 Expected result:
 
 ```text
@@ -147,20 +163,13 @@ Expected result:
 └── examples/
 ```
 
-### Optional hook merge
-
-Hook setup is explicit and opt-in. To merge the sample telemetry hooks into Claude settings:
-
-```bash
-python3 scripts/install.py --target global --with-hooks
-```
-
 Useful flags:
 
 | Flag | Effect |
 |---|---|
 | `--dry-run` | preview file copies and settings changes without writing |
-| `--with-hooks` | merge the sample telemetry hooks from `examples/hooks-settings.json` |
+| `--with-hooks` | explicitly enable hook merge; this is now the default |
+| `--without-hooks` | skip merging the sample telemetry hooks |
 | `--settings <path>` | use a different settings file, useful for testing |
 | `--backup` | accepted for compatibility; settings are backed up automatically only when a hook change is written |
 | `--force` | allow install into a non-clean target and replace conflicting managed hook entries |

@@ -89,8 +89,9 @@ def default_install_dir(target: str, cwd: Path) -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", choices=["global", "project"], required=True)
-    parser.add_argument("--with-hooks", action="store_true")
+    parser.add_argument("--target", choices=["global", "project"], default="global")
+    parser.add_argument("--with-hooks", dest="with_hooks", action="store_true", default=True)
+    parser.add_argument("--without-hooks", dest="with_hooks", action="store_false")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--settings", type=Path, default=Path.home() / ".claude/settings.json")
