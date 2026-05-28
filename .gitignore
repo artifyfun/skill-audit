@@ -5,3 +5,7 @@ __pycache__/
 .claude/
 !.vscode/settings.json
 !examples/hooks-settings.json
+docs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
