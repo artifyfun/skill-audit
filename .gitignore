@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 *.json
 *.jsonl
+.claude/
 !.vscode/settings.json
 !examples/hooks-settings.json
