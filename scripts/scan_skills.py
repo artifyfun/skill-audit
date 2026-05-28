@@ -7,6 +7,14 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+VERSION_SEGMENT_RE = re.compile(r"^v?[a-z0-9.+_-]+$", re.IGNORECASE)
+VERSION_PARSE_RE = re.compile(
+    r"^v?(?P<core>\d+(?:[._-]\d+)*)(?:(?P<sep>[._-])(?P<suffix>[a-z][a-z0-9._-]*))?$",
+    re.IGNORECASE,
+)
+VERSION_PART_RE = re.compile(r"\d+|[a-z]+", re.IGNORECASE)
+BLOCK_SCALAR_RE = re.compile(r"^(?P<style>[>|])(?P<modifiers>[+-]?\d*|\d*[+-]?)$")
+
 HOME = Path.home()
 PLUGIN_CACHE = HOME / ".claude/plugins/cache"
 GLOBAL_SKILLS = HOME / ".claude/skills"
@@ -29,20 +37,71 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
         return {}
     block = text[4:end]
     result: dict[str, Any] = {}
-    current_key: str | None = None
+    multiline_key: str | None = None
+    multiline_mode: str | None = None
+    multiline_lines: list[str] = []
+    multiline_indent: int | None = None
+    multiline_chomp: str = "clip"
+
+    def flush_multiline() -> None:
+        nonlocal multiline_key, multiline_mode, multiline_lines, multiline_indent, multiline_chomp
+        if multiline_key is None or multiline_mode is None:
+            return
+        result[multiline_key] = format_block_scalar(
+            multiline_mode,
+            choose_block_lines(multiline_lines, multiline_chomp),
+        )
+        multiline_key = None
+        multiline_mode = None
+        multiline_lines = []
+        multiline_indent = None
+        multiline_chomp = "clip"
+
     for raw_line in block.splitlines():
-        line = raw_line.rstrip()
-        if not line:
-            continue
-        if line.startswith("  ") and current_key:
-            continue
-        if ":" not in line:
+        line = raw_line.rstrip("\r")
+        if multiline_key:
+            block_line = extract_block_line(line, multiline_indent)
+            if block_line is not None:
+                multiline_indent, content = block_line
+                multiline_lines.append(content)
+                continue
+        flush_multiline()
+        if not line or ":" not in line:
             continue
         key, value = line.split(":", 1)
-        current_key = key.strip()
         value = value.strip().strip('"').strip("'")
-        result[current_key] = value
+        block_scalar = parse_block_scalar_spec(value)
+        if block_scalar is not None:
+            multiline_key = key.strip()
+            multiline_mode, multiline_chomp = block_scalar
+            multiline_lines = []
+            multiline_indent = None
+            continue
+        result[key.strip()] = value
+
+    flush_multiline()
     return result
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def infer_trigger_type(description: str, body: str) -> str:
@@ -73,6 +132,112 @@ def tokenize(description: str) -> set[str]:
     }
 
 
+def plugin_skill_identity(path: Path) -> str:
+    relative_parts = path.relative_to(PLUGIN_CACHE).parts
+    skills_index = relative_parts.index("skills")
+    plugin_parts = relative_parts[:skills_index]
+    if plugin_parts and VERSION_SEGMENT_RE.match(plugin_parts[-1]):
+        plugin_parts = plugin_parts[:-1]
+    skill_name = relative_parts[skills_index + 1]
+    return "/".join((*plugin_parts, skill_name))
+
+
+def version_token_key(value: str) -> tuple[tuple[int, int | str], ...]:
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part.lower())
+        for part in VERSION_PART_RE.findall(value)
+    )
+
+
+def plugin_skill_version_key(
+    path: Path,
+) -> tuple[int, tuple[tuple[int, int | str], ...], int, tuple[tuple[int, int | str], ...], str]:
+    relative_parts = path.relative_to(PLUGIN_CACHE).parts
+    skills_index = relative_parts.index("skills")
+    plugin_parts = relative_parts[:skills_index]
+    if not plugin_parts:
+        return (0, (), 0, (), "")
+    version = plugin_parts[-1]
+    match = VERSION_PARSE_RE.match(version)
+    if match is None:
+        return (0, version_token_key(version), 0, (), version.lower())
+
+    core = tuple((0, int(segment)) for segment in re.split(r"[._-]", match.group("core")))
+    suffix = match.group("suffix")
+    if suffix is None:
+        return (1, core, 1, (), version.lower())
+
+    return (1, core, 0, version_token_key(suffix), version.lower())
+
+
+def parse_block_scalar_value(style: str, modifiers: str) -> tuple[str, str]:
+    mode = "folded" if style == ">" else "literal"
+    chomp = "keep" if "+" in modifiers else "strip" if "-" in modifiers else "clip"
+    return mode, chomp
+
+
+def normalize_plugin_paths(paths: list[Path]) -> list[Path]:
+    latest_by_identity: dict[str, Path] = {}
+    for path in paths:
+        identity = plugin_skill_identity(path)
+        current = latest_by_identity.get(identity)
+        if current is None or plugin_skill_version_key(path) > plugin_skill_version_key(current):
+            latest_by_identity[identity] = path
+    return [path for _, path in sorted(latest_by_identity.items())]
+
+
+
+
+def choose_block_lines(lines: list[str], chomp: str) -> list[str]:
+    if chomp == "keep":
+        return lines[:]
+    normalized = lines[:]
+    while normalized and normalized[-1] == "":
+        normalized.pop()
+    if chomp == "clip":
+        normalized.append("")
+    return normalized
+
+
+def format_block_scalar(mode: str, lines: list[str]) -> str:
+    if mode == "literal":
+        return "\n".join(lines)
+
+    paragraphs: list[str] = []
+    current_paragraph: list[str] = []
+    for multiline_line in lines:
+        stripped_line = multiline_line.strip()
+        if stripped_line:
+            current_paragraph.append(stripped_line)
+            continue
+        if current_paragraph:
+            paragraphs.append(" ".join(current_paragraph))
+            current_paragraph = []
+    if current_paragraph:
+        paragraphs.append(" ".join(current_paragraph))
+    return "\n\n".join(paragraphs)
+
+
+def extract_block_line(line: str, multiline_indent: int | None) -> tuple[int | None, str] | None:
+    if not line:
+        return multiline_indent, ""
+    leading_spaces = len(line) - len(line.lstrip(" "))
+    if multiline_indent is None:
+        if leading_spaces == 0:
+            return None
+        multiline_indent = leading_spaces
+    if leading_spaces < multiline_indent:
+        return None
+    return multiline_indent, line[multiline_indent:]
+
+
+def parse_block_scalar_spec(value: str) -> tuple[str, str] | None:
+    block_scalar = BLOCK_SCALAR_RE.match(value)
+    if block_scalar is None:
+        return None
+    return parse_block_scalar_value(block_scalar.group("style"), block_scalar.group("modifiers"))
+
+
 def collect_skill_files() -> list[Path]:
     paths: list[Path] = []
     if GLOBAL_SKILLS.exists():
@@ -80,7 +245,8 @@ def collect_skill_files() -> list[Path]:
     if PROJECT_SKILLS.exists():
         paths.extend(sorted(PROJECT_SKILLS.glob("*/SKILL.md")))
     if PLUGIN_CACHE.exists():
-        paths.extend(sorted(PLUGIN_CACHE.glob("**/skills/*/SKILL.md")))
+        plugin_files = sorted(PLUGIN_CACHE.glob("**/skills/*/SKILL.md"))
+        paths.extend(normalize_plugin_paths(plugin_files))
     return paths
 
 
@@ -125,6 +291,8 @@ def main() -> None:
         if not left_tokens:
             continue
         for right in skills[index + 1 :]:
+            if left["name"] == right["name"] or left["description"] == right["description"]:
+                continue
             shared = sorted(left_tokens & set(right["tokens"]))
             if len(shared) < 3:
                 continue
