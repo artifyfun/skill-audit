@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "input=$(cat); prompt=$(printf '%s' \"$input\" | jq -r '.user_prompt // empty'); printf '{\"event\":\"prompt\",\"prompt\":%s}\n' \"$(printf '%s' \"$prompt\" | jq -Rs .)\" >> ~/.claude/skills/skill-audit-usage.jsonl"
+            "command": "input=$(cat); prompt=$(printf '%s' \"$input\" | jq -r '.user_prompt // empty'); jq -cn --arg prompt \"$prompt\" '{event:\"prompt\",prompt:$prompt}' >> ~/.claude/skills/skill-audit-usage.jsonl"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "input=$(cat); cmd=$(printf '%s' \"$input\" | jq -r '.tool_input.command // empty'); printf '{\"event\":\"pre_tool\",\"tool\":\"Bash\",\"command\":%s}\n' \"$(printf '%s' \"$cmd\" | jq -Rs .)\" >> ~/.claude/skills/skill-audit-usage.jsonl"
+            "command": "input=$(cat); cmd=$(printf '%s' \"$input\" | jq -r '.tool_input.command // empty'); jq -cn --arg command \"$cmd\" '{event:\"pre_tool\",tool:\"Bash\",command:$command}' >> ~/.claude/skills/skill-audit-usage.jsonl"
           }
         ]
       }

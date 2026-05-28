@@ -9,7 +9,7 @@ description: installable skill spec for auditing Claude skills by structure and 
 - **structure**: what skills exist, where they came from, and where names or descriptions overlap
 - **usage evidence**: which skills have credible signs of invocation, and how strong that evidence is
 
-This repository is intentionally safe to install as a project-local or global skill because it documents current behavior honestly and does not require mutating live Claude settings automatically.
+This repository is intentionally safe to install as a project-local or global skill because settings changes are explicit, opt-in, and handled by the installer rather than hidden side effects.
 
 ## Purpose
 
@@ -43,6 +43,31 @@ This skill does **not**:
 
 `quick` is a valid **target design** for a future version, but it is **not implemented in this repository today**.
 
+## Installation
+
+Install or update the full skill payload with the installer:
+
+| Target | Command |
+|---|---|
+| global | `python3 scripts/install.py --target global` |
+| project-local | `python3 scripts/install.py --target project` |
+
+Optional hook setup remains explicit:
+
+```bash
+python3 scripts/install.py --target global --with-hooks
+```
+
+Installer guarantees:
+
+| Behavior | Result |
+|---|---|
+| repeated install with unchanged files | no-op copy result |
+| repeated hook merge with identical entries | no duplicate hook entries |
+| conflicting managed hook commands | conflict reported unless `--force` is passed |
+| settings write | existing settings file is backed up first |
+| `--dry-run` | planned copies and settings change are reported without writes |
+
 ## Required deliverables
 
 An installable copy of this skill should contain at least these files:
@@ -52,8 +77,13 @@ skill-audit/
 ├── SKILL.md
 ├── README.md
 ├── scripts/
+│   ├── install.py
 │   ├── scan_skills.py
-│   └── scan_usage.py
+│   ├── scan_usage.py
+│   └── lib/
+│       ├── install_manifest.py
+│       ├── install_skill.py
+│       └── settings_merge.py
 └── examples/
     └── hooks-settings.json
 ```

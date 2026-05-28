@@ -33,9 +33,10 @@ This repository currently ships these runnable components:
 |---|---|---|
 | `SKILL.md` | installable skill definition and execution spec | yes |
 | `README.md` | installation and runtime guide | yes |
-| `scripts/scan_skills.py` | structure scanner | yes |
-| `scripts/scan_usage.py` | usage evidence scanner | yes |
-| `examples/hooks-settings.json` | optional telemetry example | yes |
+| `scripts/install.py` | installer entrypoint | yes |
+| `scripts/lib/install_manifest.py` | install manifest and required hook payload loader | yes |
+| `scripts/lib/install_skill.py` | file copy and install target validation | yes |
+| `scripts/lib/settings_merge.py` | settings merge, conflict detection, and backup logic | yes |
 
 These are **target design ideas**, not shipped behavior in this repo:
 
@@ -78,8 +79,13 @@ skill-audit/
 ├── SKILL.md
 ├── README.md
 ├── scripts/
+│   ├── install.py
 │   ├── scan_skills.py
-│   └── scan_usage.py
+│   ├── scan_usage.py
+│   └── lib/
+│       ├── install_manifest.py
+│       ├── install_skill.py
+│       └── settings_merge.py
 ├── examples/
 │   └── hooks-settings.json
 └── .gitignore
@@ -105,44 +111,70 @@ Install the whole directory, not just `SKILL.md`.
 
 ### Install as a global skill
 
-Clone the repository directly into your global Claude skills directory:
+Use the installer to copy the full skill payload into your global Claude skills directory:
 
 ```bash
-git clone https://github.com/artifyfun/skill-audit.git ~/.claude/skills/skill-audit
+python3 scripts/install.py --target global
 ```
 
-If the directory already exists, update it in place:
+Preview the copy plan first if you want to confirm the destination:
 
 ```bash
-git -C ~/.claude/skills/skill-audit pull --ff-only
+python3 scripts/install.py --target global --dry-run
+```
+
+### Install as a project-local skill
+
+Use the installer to copy the skill into the current project's local Claude skills directory:
+
+```bash
+python3 scripts/install.py --target project
+```
+
+Preview the local install first:
+
+```bash
+python3 scripts/install.py --target project --dry-run
 ```
 
 Expected result:
 
 ```text
-~/.claude/skills/skill-audit/
+<target>/skill-audit/
 ├── SKILL.md
 ├── README.md
 ├── scripts/
 └── examples/
 ```
 
-### Install as a project-local skill
+### Optional hook merge
 
-Clone the repository into the current project's local Claude skills directory:
-
-```bash
-mkdir -p .claude/skills
-git clone https://github.com/artifyfun/skill-audit.git ./.claude/skills/skill-audit
-```
-
-If it is already installed locally, update it in place:
+Hook setup is explicit and opt-in. To merge the sample telemetry hooks into Claude settings:
 
 ```bash
-git -C ./.claude/skills/skill-audit pull --ff-only
+python3 scripts/install.py --target global --with-hooks
 ```
 
-Use project-local installation when you want the audit logic versioned with a repo.
+Useful flags:
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | preview file copies and settings changes without writing |
+| `--with-hooks` | merge the sample telemetry hooks from `examples/hooks-settings.json` |
+| `--settings <path>` | use a different settings file, useful for testing |
+| `--backup` | accepted for compatibility; settings are backed up automatically only when a hook change is written |
+| `--force` | allow install into a non-clean target and replace conflicting managed hook entries |
+
+Hook merge rules:
+
+| Behavior | Result |
+|---|---|
+| missing settings file | a new minimal settings object is planned or written only when `--with-hooks` is used |
+| identical managed hooks already present | no duplicate hook entries are added |
+| conflicting hook entry with same matcher but different commands | installer reports a conflict unless `--force` is passed |
+| settings change is written | existing settings file is backed up first |
+
+The installer writes JSON to stdout describing what it planned or changed.
 
 ### What a fresh AI should assume after install
 
