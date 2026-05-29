@@ -9,7 +9,7 @@ description: installable skill spec for auditing Claude skills by structure and 
 - **structure**: what skills exist, where they came from, and where names or descriptions overlap
 - **usage evidence**: which skills have credible signs of invocation, and how strong that evidence is
 
-This repository is intentionally safe to install as a project-local or global skill because settings changes are explicit, opt-in, and handled by the installer rather than hidden side effects.
+This repository is intentionally safe to install as a project-local or global skill because settings changes are handled by the installer rather than hidden side effects, with hook merge enabled by default and `--without-hooks` available as an opt-out.
 
 ## Purpose
 
@@ -52,10 +52,16 @@ Install or update the full skill payload with the installer:
 | global | `python3 scripts/install.py --target global` |
 | project-local | `python3 scripts/install.py --target project` |
 
-Optional hook setup remains explicit:
+Global install merges the sample hooks by default:
 
 ```bash
-python3 scripts/install.py --target global --with-hooks
+python3 scripts/install.py --target global
+```
+
+Opt out of hook changes if needed:
+
+```bash
+python3 scripts/install.py --target global --without-hooks
 ```
 
 Installer guarantees:
@@ -139,9 +145,11 @@ It emits JSON to stdout containing:
 | `summary.sources` | counts by source surface |
 | `summary.trigger_types` | counts of `explicit`, `auto-run`, `unknown` |
 | `skills[]` | per-skill inventory entries |
-| `duplicate_name_candidates` | repeated names across paths |
-| `duplicate_description_candidates` | repeated descriptions |
-| `overlap_candidates` | lightweight token-overlap matches |
+| `duplicate_name_candidates` | repeated names across logical skills after mirror collapse |
+| `duplicate_description_candidates` | repeated descriptions after mirror collapse |
+| `overlap_candidates` | lightweight token-overlap matches after mirror collapse |
+
+Raw inventory still counts mirrored installs by source. Only the candidate sections collapse mirror copies to reduce review noise.
 
 ### Phase 2 — Usage evidence scan
 
@@ -172,7 +180,9 @@ Current evidence inputs used by the script:
 Rules:
 - Never treat `ref=0` or `none` as proof a skill is dead.
 - Never rank from `inferred` evidence.
-- If strong sources are missing, report `insufficient_evidence` rather than inventing certainty.
+- Treat `execution-log.jsonl` and `skill-audit-usage.jsonl` as the only strong telemetry sources.
+- Use `evidence_state.ranking_safe` as the machine-readable signal for whether exact rankings have a strong basis.
+- If both strong sources are missing, report `insufficient_evidence` rather than inventing certainty.
 
 ### Phase 3 — Combined interpretation
 

@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 HOME = Path.home()
+PLUGIN_CACHE = HOME / ".claude/plugins/cache"
 GLOBAL_SKILLS = HOME / ".claude/skills"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PROJECT_SKILLS = REPO_ROOT / ".claude/skills"
@@ -25,6 +26,8 @@ def collect_known_skills() -> set[str]:
         if not root.exists():
             continue
         known_skills.update(path.parent.name for path in root.glob("*/SKILL.md"))
+    if PLUGIN_CACHE.exists():
+        known_skills.update(path.parent.name for path in PLUGIN_CACHE.glob("**/skills/*/SKILL.md"))
     return known_skills
 
 
@@ -144,6 +147,30 @@ def read_memory_markers(results: dict[str, dict[str, Any]], known_skills: set[st
     return limitations
 
 
+def build_evidence_state() -> dict[str, Any]:
+    strong_sources = {
+        "execution-log.jsonl": EXECUTION_LOG.exists(),
+        "skill-audit-usage.jsonl": AUDIT_USAGE_LOG.exists(),
+    }
+    strong_sources_present = [name for name, present in strong_sources.items() if present]
+    strong_sources_missing = [name for name, present in strong_sources.items() if not present]
+    ranking_safe = not strong_sources_missing
+
+    if ranking_safe:
+        note = "Both strong telemetry sources are present; exact rankings have a solid basis."
+    elif strong_sources_present:
+        note = "Only part of the strong telemetry is present; rankings should be treated cautiously."
+    else:
+        note = "Strong telemetry is missing; rankings are not safe to interpret."
+
+    return {
+        "strong_sources_present": strong_sources_present,
+        "strong_sources_missing": strong_sources_missing,
+        "ranking_safe": ranking_safe,
+        "note": note,
+    }
+
+
 def main() -> None:
     known_skills = collect_known_skills()
     results: dict[str, dict[str, Any]] = {}
@@ -161,12 +188,14 @@ def main() -> None:
     )[:10]
 
     confidence_counts = Counter(entry["confidence"] for entry in results.values())
+    evidence_state = build_evidence_state()
     status = "ok"
-    if not EXECUTION_LOG.exists() and not AUDIT_USAGE_LOG.exists():
+    if not evidence_state["strong_sources_present"]:
         status = "insufficient_evidence"
 
     payload = {
         "status": status,
+        "evidence_state": evidence_state,
         "summary": {
             "known_skills": len(known_skills),
             "skills_with_any_evidence": len(results),

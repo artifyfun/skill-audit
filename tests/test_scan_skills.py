@@ -228,7 +228,45 @@ def test_collect_skill_files_handles_unparsed_version_segments_without_type_erro
     files = scan_skills.collect_skill_files()
 
     assert files == [
+        plugin_cache / "vendor/plugin/release-2024/skills/brainstorming/SKILL.md",
         plugin_cache / "vendor/plugin/release-2025/skills/brainstorming/SKILL.md",
+    ]
+
+
+def test_collect_skill_files_preserves_unversioned_plugin_namespaces(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    plugin_cache = tmp_path / ".claude/plugins/cache"
+    global_skills = tmp_path / ".claude/skills"
+    project_skills = tmp_path / "repo/.claude/skills"
+
+    write_skill(
+        plugin_cache / "vendor/plugin/skills/brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Turn ideas into designs with approval gates.",
+    )
+    write_skill(
+        plugin_cache / "vendor/plugin/skills/planning/SKILL.md",
+        name="planning",
+        description="Create implementation plans for engineering work.",
+    )
+    write_skill(
+        plugin_cache / "vendor/stable/skills/brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Different plugin should keep its own namespace.",
+    )
+
+    monkeypatch.setattr(scan_skills, "PLUGIN_CACHE", plugin_cache)
+    monkeypatch.setattr(scan_skills, "GLOBAL_SKILLS", global_skills)
+    monkeypatch.setattr(scan_skills, "PROJECT_SKILLS", project_skills)
+
+    files = scan_skills.collect_skill_files()
+
+    assert files == [
+        plugin_cache / "vendor/plugin/skills/brainstorming/SKILL.md",
+        plugin_cache / "vendor/plugin/skills/planning/SKILL.md",
+        plugin_cache / "vendor/stable/skills/brainstorming/SKILL.md",
     ]
 
 
@@ -272,19 +310,162 @@ def test_main_excludes_version_only_plugin_duplicates_from_duplicate_and_overlap
         "sources": {"global": 1, "plugin-cache": 2},
         "trigger_types": {"unknown": 3},
     }
+    assert result["duplicate_name_candidates"] == []
+    assert result["duplicate_description_candidates"] == []
+    assert result["overlap_candidates"] == []
+
+
+def test_main_collapses_identical_mirrored_installs_across_sources_for_candidates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    plugin_cache = tmp_path / ".claude/plugins/cache"
+    global_skills = tmp_path / ".claude/skills"
+    project_skills = tmp_path / "repo/.claude/skills"
+
+    write_skill(
+        global_skills / "brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Turn ideas into designs with approval gates.",
+    )
+    write_skill(
+        project_skills / "brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Turn ideas into designs with approval gates.",
+    )
+    write_skill(
+        plugin_cache / "vendor/plugin/1.0.0/skills/brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Turn ideas into designs with approval gates.",
+    )
+
+    monkeypatch.setattr(scan_skills, "PLUGIN_CACHE", plugin_cache)
+    monkeypatch.setattr(scan_skills, "GLOBAL_SKILLS", global_skills)
+    monkeypatch.setattr(scan_skills, "PROJECT_SKILLS", project_skills)
+
+    result = run_main()
+
+    assert result["summary"] == {
+        "total_skills": 3,
+        "sources": {"global": 1, "plugin-cache": 1, "project": 1},
+        "trigger_types": {"unknown": 3},
+    }
+    assert result["duplicate_name_candidates"] == []
+    assert result["duplicate_description_candidates"] == []
+    assert result["overlap_candidates"] == []
+
+
+def test_main_keeps_duplicate_name_candidates_for_same_name_different_descriptions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    plugin_cache = tmp_path / ".claude/plugins/cache"
+    global_skills = tmp_path / ".claude/skills"
+    project_skills = tmp_path / "repo/.claude/skills"
+
+    write_skill(
+        global_skills / "brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Turn ideas into designs with approval gates.",
+    )
+    write_skill(
+        project_skills / "brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Generate varied ideas from loose prompts.",
+    )
+
+    monkeypatch.setattr(scan_skills, "PLUGIN_CACHE", plugin_cache)
+    monkeypatch.setattr(scan_skills, "GLOBAL_SKILLS", global_skills)
+    monkeypatch.setattr(scan_skills, "PROJECT_SKILLS", project_skills)
+
+    result = run_main()
+
     assert result["duplicate_name_candidates"] == [
         {
             "name": "brainstorming",
             "paths": [
                 str(global_skills / "brainstorming/SKILL.md"),
-                str(plugin_cache / "vendor/plugin/1.10.0/skills/brainstorming/SKILL.md"),
+                str(project_skills / "brainstorming/SKILL.md"),
             ],
         }
     ]
+
+
+def test_main_keeps_duplicate_description_candidates_for_distinct_skills(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    plugin_cache = tmp_path / ".claude/plugins/cache"
+    global_skills = tmp_path / ".claude/skills"
+    project_skills = tmp_path / "repo/.claude/skills"
+
+    write_skill(
+        global_skills / "brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Turn ideas into designs with approval gates.",
+    )
+    write_skill(
+        project_skills / "planning/SKILL.md",
+        name="planning",
+        description="Turn ideas into designs with approval gates.",
+    )
+
+    monkeypatch.setattr(scan_skills, "PLUGIN_CACHE", plugin_cache)
+    monkeypatch.setattr(scan_skills, "GLOBAL_SKILLS", global_skills)
+    monkeypatch.setattr(scan_skills, "PROJECT_SKILLS", project_skills)
+
+    result = run_main()
+
     assert result["duplicate_description_candidates"] == [
         {
             "description": "Turn ideas into designs with approval gates.",
-            "skills": ["brainstorming", "brainstorming"],
+            "skills": ["brainstorming", "planning"],
         }
     ]
-    assert result["overlap_candidates"] == []
+
+
+def test_main_ignores_mirror_copies_when_calculating_overlap_candidates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    plugin_cache = tmp_path / ".claude/plugins/cache"
+    global_skills = tmp_path / ".claude/skills"
+    project_skills = tmp_path / "repo/.claude/skills"
+
+    write_skill(
+        global_skills / "brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Turn ideas into designs with approval gates.",
+    )
+    write_skill(
+        project_skills / "brainstorming/SKILL.md",
+        name="brainstorming",
+        description="Turn ideas into designs with approval gates.",
+    )
+    write_skill(
+        project_skills / "ideation/SKILL.md",
+        name="ideation",
+        description="Turn ideas into designs with approval gates for engineering teams.",
+    )
+
+    monkeypatch.setattr(scan_skills, "PLUGIN_CACHE", plugin_cache)
+    monkeypatch.setattr(scan_skills, "GLOBAL_SKILLS", global_skills)
+    monkeypatch.setattr(scan_skills, "PROJECT_SKILLS", project_skills)
+
+    result = run_main()
+
+    assert result["overlap_candidates"] == [
+        {
+            "left": {
+                "name": "brainstorming",
+                "path": str(global_skills / "brainstorming/SKILL.md"),
+                "location": "global",
+            },
+            "right": {
+                "name": "ideation",
+                "path": str(project_skills / "ideation/SKILL.md"),
+                "location": "project",
+            },
+            "shared_tokens": ["approval", "designs", "gates", "ideas", "turn"],
+        }
+    ]

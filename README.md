@@ -179,7 +179,7 @@ Hook merge rules:
 
 | Behavior | Result |
 |---|---|
-| missing settings file | a new minimal settings object is planned or written only when `--with-hooks` is used |
+| missing settings file | a new minimal settings object is planned or written when hook merge is enabled, which is the default unless `--without-hooks` is used |
 | identical managed hooks already present | no duplicate hook entries are added |
 | conflicting hook entry with same matcher but different commands | installer reports a conflict unless `--force` is passed, except `PreToolUse:Bash` when `--append-pretooluse-bash` is used |
 | settings change is written | existing settings file is backed up first |
@@ -233,9 +233,11 @@ It emits JSON with these major sections:
 |---|---|
 | `summary` | totals by source and trigger type |
 | `skills` | per-skill inventory |
-| `duplicate_name_candidates` | repeated names |
-| `duplicate_description_candidates` | repeated descriptions |
-| `overlap_candidates` | token-overlap review candidates |
+| `duplicate_name_candidates` | repeated names after collapsing mirrored installs |
+| `duplicate_description_candidates` | repeated descriptions after collapsing mirrored installs |
+| `overlap_candidates` | token-overlap review candidates after collapsing mirrored installs |
+
+Raw inventory still counts each discovered install by source. Candidate sections collapse mirror copies of the same logical skill so review noise stays lower.
 
 ### 2. Usage scan
 
@@ -263,11 +265,9 @@ Current evidence inputs:
 | `~/.claude/memory/today.md` | supporting markers | yes |
 | `~/.claude/memory/yesterday.md` | supporting markers | yes |
 
-If both strong log sources are missing, the script returns:
+The output also includes an `evidence_state` object with `strong_sources_present`, `strong_sources_missing`, `ranking_safe`, and `note`.
 
-```json
-{ "status": "insufficient_evidence" }
-```
+If both strong log sources are missing, the script returns `status: "insufficient_evidence"`. If only one strong source exists, status stays `"ok"` but `evidence_state.ranking_safe` stays `false`.
 
 That means observability is limited, not that your skills are unused.
 

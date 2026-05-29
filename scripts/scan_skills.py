@@ -125,6 +125,27 @@ def source_label(path: Path) -> tuple[str, str]:
     return "unknown", "unknown"
 
 
+def mirror_identity(skill: dict[str, Any]) -> tuple[str, str, tuple[str, ...]]:
+    return (
+        str(skill["name"]),
+        str(skill["description"]),
+        tuple(skill["tokens"]),
+    )
+
+
+def collapse_mirrored_skills(skills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    collapsed: dict[tuple[str, str, tuple[str, ...], str], dict[str, Any]] = {}
+    for skill in skills:
+        identity = mirror_identity(skill)
+        current = collapsed.get(identity)
+        if current is None or (str(skill["location"]), str(skill["path"])) < (
+            str(current["location"]),
+            str(current["path"]),
+        ):
+            collapsed[identity] = skill
+    return list(collapsed.values())
+
+
 def tokenize(description: str) -> set[str]:
     return {
         token for token in WORD_RE.findall(description.lower())
@@ -136,7 +157,7 @@ def plugin_skill_identity(path: Path) -> str:
     relative_parts = path.relative_to(PLUGIN_CACHE).parts
     skills_index = relative_parts.index("skills")
     plugin_parts = relative_parts[:skills_index]
-    if plugin_parts and VERSION_SEGMENT_RE.match(plugin_parts[-1]):
+    if plugin_parts and VERSION_PARSE_RE.match(plugin_parts[-1]):
         plugin_parts = plugin_parts[:-1]
     skill_name = relative_parts[skills_index + 1]
     return "/".join((*plugin_parts, skill_name))
@@ -252,9 +273,6 @@ def collect_skill_files() -> list[Path]:
 
 def main() -> None:
     skills: list[dict[str, Any]] = []
-    duplicate_names: defaultdict[str, list[str]] = defaultdict(list)
-    duplicate_descriptions: defaultdict[str, list[str]] = defaultdict(list)
-    token_buckets: defaultdict[str, list[str]] = defaultdict(list)
     source_counts: Counter[str] = Counter()
     trigger_counts: Counter[str] = Counter()
 
@@ -279,18 +297,22 @@ def main() -> None:
         skills.append(skill)
         source_counts[location] += 1
         trigger_counts[trigger_type] += 1
-        duplicate_names[name].append(str(file_path))
+
+    candidate_skills = collapse_mirrored_skills(skills)
+    duplicate_names: defaultdict[str, list[str]] = defaultdict(list)
+    duplicate_descriptions: defaultdict[str, list[str]] = defaultdict(list)
+    for skill in candidate_skills:
+        duplicate_names[str(skill["name"])].append(str(skill["path"]))
+        description = str(skill["description"])
         if description:
-            duplicate_descriptions[description].append(name)
-        for token in tokens:
-            token_buckets[token].append(name)
+            duplicate_descriptions[description].append(str(skill["name"]))
 
     overlaps: list[dict[str, Any]] = []
-    for index, left in enumerate(skills):
+    for index, left in enumerate(candidate_skills):
         left_tokens = set(left["tokens"])
         if not left_tokens:
             continue
-        for right in skills[index + 1 :]:
+        for right in candidate_skills[index + 1 :]:
             if left["name"] == right["name"] or left["description"] == right["description"]:
                 continue
             shared = sorted(left_tokens & set(right["tokens"]))
