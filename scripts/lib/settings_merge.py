@@ -26,8 +26,9 @@ class ConflictError(ValueError):
 
 def _ensure_safe_path(path: PathLike[str] | str) -> Path:
     candidate_path = Path(path).expanduser()
-    if candidate_path.exists() and candidate_path.is_symlink():
-        raise SettingsParseError(f"refusing to use symlink path: {candidate_path}")
+    for path_part in (candidate_path, *candidate_path.parents):
+        if path_part.is_symlink():
+            raise SettingsParseError(f"refusing to use symlink path: {candidate_path}")
     return candidate_path.resolve(strict=False)
 
 
@@ -130,14 +131,25 @@ def _find_matching_entry_index(entries: list[Any], matcher: str, commands: Comma
 
 
 
-def _find_managed_entry_index(entries: list[Any], event_name: str, matcher: str, managed_hooks: set[str]) -> int | None:
+def _find_managed_entry_index(
+    entries: list[Any],
+    event_name: str,
+    matcher: str,
+    managed_hooks: set[str],
+    required_commands: CommandFingerprint | None = None,
+) -> int | None:
     managed_key = _managed_key(event_name, matcher)
     if managed_key not in managed_hooks:
         return None
     matches = _matching_entries(entries, matcher)
     if len(matches) != 1:
         return None
-    return matches[0][0]
+    index, entry = matches[0]
+    if required_commands is not None:
+        _, entry_commands = _command_fingerprint(entry)
+        if set(required_commands).issubset(entry_commands) and entry_commands != required_commands:
+            return None
+    return index
 
 
 
@@ -178,7 +190,17 @@ def detect_conflicts(
             matcher, commands = _command_fingerprint(required_entry)
             if _find_matching_entry_index(current_entries, matcher, commands) is not None:
                 continue
-            if force and _find_managed_entry_index(current_entries, event_name, matcher, managed_hooks) is not None:
+            if (
+                force
+                and _find_managed_entry_index(
+                    current_entries,
+                    event_name,
+                    matcher,
+                    managed_hooks,
+                    required_commands=commands,
+                )
+                is not None
+            ):
                 continue
             if append_pretooluse_bash and event_name == "PreToolUse" and matcher == "Bash":
                 continue
@@ -219,7 +241,13 @@ def _replace_managed_entry(
     matcher: str,
     managed_hooks: set[str],
 ) -> bool:
-    replacement_index = _find_managed_entry_index(entries, event_name, matcher, managed_hooks)
+    replacement_index = _find_managed_entry_index(
+        entries,
+        event_name,
+        matcher,
+        managed_hooks,
+        required_commands=_command_fingerprint(required_entry)[1],
+    )
     if replacement_index is None:
         raise ConflictError([_event_conflict_path(event_name, matcher)])
     entries[replacement_index] = copy.deepcopy(required_entry)
@@ -234,6 +262,7 @@ def _append_pretooluse_bash_command(
     event_name: str,
     matcher: str,
     commands: CommandFingerprint,
+    managed_hooks: set[str],
 ) -> bool:
     matches = _matching_entries(entries, matcher)
     if len(matches) != 1:
@@ -245,6 +274,7 @@ def _append_pretooluse_bash_command(
         raise ConflictError([_event_conflict_path(event_name, matcher)])
 
     existing_commands = {tuple(command) for command in _command_fingerprint(entry)[1]}
+    managed_hooks.discard(_managed_key(event_name, matcher))
     changed = False
     for hook_type, command in commands:
         if (hook_type, command) in existing_commands:
@@ -267,10 +297,10 @@ def _merge_required_entry(
     append_pretooluse_bash: bool,
 ) -> bool:
     matcher, commands = _command_fingerprint(required_entry)
+    if append_pretooluse_bash and event_name == "PreToolUse" and matcher == "Bash":
+        return _append_pretooluse_bash_command(entries, required_entry, event_name, matcher, commands, managed_hooks)
     if _find_matching_entry_index(entries, matcher, commands) is not None:
         return _ensure_managed_marker(event_name, matcher, managed_hooks)
-    if append_pretooluse_bash and event_name == "PreToolUse" and matcher == "Bash":
-        return _append_pretooluse_bash_command(entries, required_entry, event_name, matcher, commands)
     if force and _find_managed_entry_index(entries, event_name, matcher, managed_hooks) is not None:
         return _replace_managed_entry(entries, required_entry, event_name, matcher, managed_hooks)
     return _append_required_entry(entries, required_entry, event_name, matcher, managed_hooks)

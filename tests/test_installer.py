@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -433,6 +434,163 @@ def test_run_install_force_still_reports_pretooluse_conflict_after_append_mode(t
     ]
 
 
+def test_run_install_append_mode_does_not_claim_existing_telemetry_only_bash_entry(tmp_path: Path) -> None:
+    source_dir = make_source_tree(tmp_path)
+    install_dir = tmp_path / "installed" / "skill-audit"
+    settings_path = tmp_path / "settings.json"
+    telemetry_command = json.loads(FILES_TO_COPY["examples/hooks-settings.json"])["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": telemetry_command}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        append_pretooluse_bash=True,
+    )
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    assert result.conflicts == []
+    assert result.hooks_merged is True
+    assert result.planned_settings_change is True
+    assert settings["hooks"]["PreToolUse"] == [
+        {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": telemetry_command}],
+        }
+    ]
+    assert settings["hooks"]["UserPromptSubmit"] == json.loads(FILES_TO_COPY["examples/hooks-settings.json"])["hooks"]["UserPromptSubmit"]
+    assert settings["metadata"]["skill-audit-managed"] == ["UserPromptSubmit:*"]
+
+    second = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        append_pretooluse_bash=True,
+    )
+
+    assert second.changed is False
+    assert second.hooks_merged is False
+    assert second.planned_settings_change is False
+
+
+def test_run_install_append_mode_clears_stale_managed_marker_for_existing_bash_entry(tmp_path: Path) -> None:
+    source_dir = make_source_tree(tmp_path)
+    install_dir = tmp_path / "installed" / "skill-audit"
+    settings_path = tmp_path / "settings.json"
+    telemetry_command = json.loads(FILES_TO_COPY["examples/hooks-settings.json"])["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": telemetry_command}],
+                        }
+                    ]
+                },
+                "metadata": {"skill-audit-managed": ["PreToolUse:Bash", "UserPromptSubmit:*"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        append_pretooluse_bash=True,
+    )
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    assert result.conflicts == []
+    assert result.hooks_merged is True
+    assert settings["hooks"]["UserPromptSubmit"] == json.loads(FILES_TO_COPY["examples/hooks-settings.json"])["hooks"]["UserPromptSubmit"]
+    assert settings["metadata"]["skill-audit-managed"] == ["UserPromptSubmit:*"]
+
+    forced = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        force=True,
+        append_pretooluse_bash=True,
+    )
+
+    assert forced.conflicts == []
+    assert forced.changed is False
+    assert forced.hooks_merged is False
+    assert forced.planned_settings_change is False
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == settings
+
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {"type": "command", "command": "printf 'user' >> /tmp/bash.log"},
+                                {"type": "command", "command": telemetry_command},
+                            ],
+                        }
+                    ]
+                },
+                "metadata": {"skill-audit-managed": ["PreToolUse:Bash", "UserPromptSubmit:*"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result_with_user_hook = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        append_pretooluse_bash=True,
+    )
+    settings_with_user_hook = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    assert result_with_user_hook.conflicts == []
+    assert result_with_user_hook.hooks_merged is True
+    assert settings_with_user_hook["metadata"]["skill-audit-managed"] == ["UserPromptSubmit:*"]
+
+    forced_with_user_hook = run_install(
+        source_dir=source_dir,
+        install_dir=install_dir,
+        settings_path=settings_path,
+        with_hooks=True,
+        force=True,
+        append_pretooluse_bash=True,
+    )
+
+    assert forced_with_user_hook.conflicts == []
+    assert forced_with_user_hook.changed is False
+    assert forced_with_user_hook.hooks_merged is False
+    assert forced_with_user_hook.planned_settings_change is False
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == settings_with_user_hook
+
+
 def test_cli_returns_non_zero_on_conflict(tmp_path: Path) -> None:
     source_dir = make_source_tree(tmp_path)
     repo_root = tmp_path / "repo"
@@ -499,7 +657,7 @@ def test_cli_with_hooks_creates_backup_without_backup_flag(tmp_path: Path) -> No
         file_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
 
     settings_path = tmp_path / "settings.json"
-    original_settings = {"hooks": {"OtherEvent": []}}
+    original_settings: dict[str, Any] = {"hooks": {"OtherEvent": []}}
     settings_path.write_text(json.dumps(original_settings), encoding="utf-8")
 
     result = subprocess.run(
@@ -540,7 +698,7 @@ def test_cli_with_backup_flag_creates_backup_when_settings_change(tmp_path: Path
         file_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
 
     settings_path = tmp_path / "settings.json"
-    original_settings = {"hooks": {"OtherEvent": []}}
+    original_settings: dict[str, Any] = {"hooks": {"OtherEvent": []}}
     settings_path.write_text(json.dumps(original_settings), encoding="utf-8")
 
     result = subprocess.run(
@@ -637,7 +795,7 @@ def test_cli_without_hooks_skips_settings_changes(tmp_path: Path) -> None:
     fake_home = tmp_path / "home"
     settings_path = fake_home / ".claude" / "settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    original_settings = {"hooks": {"OtherEvent": []}}
+    original_settings: dict[str, Any] = {"hooks": {"OtherEvent": []}}
     settings_path.write_text(json.dumps(original_settings), encoding="utf-8")
 
     result = subprocess.run(
